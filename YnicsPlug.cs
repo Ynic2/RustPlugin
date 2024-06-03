@@ -137,24 +137,6 @@ namespace Oxide.Plugins{
         bool IsAdmin(BasePlayer player) {
         return player.IsAdmin || player.net?.connection?.authLevel == 2;
         }
-
-        void CreateMarker(BasePlayer player, string command, string[] args){
-            Vector3 markPosition = new Vector3((float)Convert.ToDouble(args[0]), (float)Convert.ToDouble(args[1]), (float)Convert.ToDouble(args[2]));
-            var mapMarker = GameManager.server.CreateEntity("assets/prefabs/tools/map/genericradiusmarker.prefab", markPosition) as MapMarkerGenericRadius;
-            if (mapMarker == null) {
-                player.ChatMessage("Ошибка при создании маркера на карте.");
-                Puts("Ошибка при создании маркера на карте.");
-                return;
-            }
-            mapMarker.alpha = 1f;
-            mapMarker.color1 = Color.red;
-            mapMarker.color2 = Color.black;
-            mapMarker.radius = 0.1f;
-            mapMarker.name = "Custom Map Marker";
-            mapMarker.Spawn();
-            mapMarker.SendUpdate();
-            player.ChatMessage(markPosition.ToString());
-        }
         
         void CreateMarker(Vector3 markPosition){
             MapMarkerGenericRadius mapMarker = GameManager.server.CreateEntity(
