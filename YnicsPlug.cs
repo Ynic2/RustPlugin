@@ -73,7 +73,8 @@ namespace Oxide.Plugins{
         void StopTimer(){
             isWork = false;
             foreach (var player in BasePlayer.activePlayerList) {
-                    CuiHelper.DestroyUi(player, "timer_background");
+                CuiHelper.DestroyUi(player, "timer_background");
+                restrictedPlayers.Add(player.userID);
             }
         }
 
