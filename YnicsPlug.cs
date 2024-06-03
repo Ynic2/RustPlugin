@@ -198,6 +198,31 @@ namespace Oxide.Plugins{
             }
         }
 
+        [ChatCommand("pvp")]
+        void ChangePVP(BasePlayer player){
+            pvpMode = !pvpMode;
+            player.ChatMessage("Pvp = " + pvpMode);
+            Puts("Pvp = " + pvpMode);
+        }
+
+        object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {   
+            if (!pvpMode){
+                if (entity is BasePlayer targetPlayer)
+                {
+                    if (info.Initiator is BasePlayer attackerPlayer)
+                    {
+                        if (attackerPlayer != targetPlayer)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        bool pvpMode = true;
         private List<MapMarkerGenericRadius> markOfToolbox = new List<MapMarkerGenericRadius>();
         private List<ulong> restrictedPlayers = new List<ulong>();
         string CUI_MAIN = @"
