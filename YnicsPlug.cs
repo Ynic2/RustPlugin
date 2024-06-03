@@ -200,6 +200,10 @@ namespace Oxide.Plugins{
 
         [ChatCommand("pvp")]
         void ChangePVP(BasePlayer player){
+            if (!IsAdmin(player)){
+                player.ChatMessage("У вас не хватает прав");
+                return;
+            }
             pvpMode = !pvpMode;
             player.ChatMessage("Pvp = " + pvpMode);
             Puts("Pvp = " + pvpMode);
