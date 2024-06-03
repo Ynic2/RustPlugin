@@ -208,10 +208,17 @@ namespace Oxide.Plugins{
         object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
         {   
             if (!pvpMode){
-                if (entity is BasePlayer targetPlayer)
-                {
-                    if (info.Initiator is BasePlayer attackerPlayer)
-                    {
+                if (entity is BasePlayer targetPlayer && 
+                !targetPlayer.ShortPrefabName.Contains("scientistnpc") &&
+                !targetPlayer.ShortPrefabName.Contains("npc_tunnel") && 
+                !targetPlayer.ShortPrefabName.Contains("npc_underwater") &&
+                targetPlayer.ShortPrefabName != "npc_bandit_guard"){
+
+                    if (info.Initiator is BasePlayer attackerPlayer && 
+                    !attackerPlayer.ShortPrefabName.Contains("scientistnpc") &&
+                    !attackerPlayer.ShortPrefabName.Contains("npc_tunnel") && 
+                    !attackerPlayer.ShortPrefabName.Contains("npc_underwater") &&
+                    attackerPlayer.ShortPrefabName != "npc_bandit_guard"){
                         if (attackerPlayer != targetPlayer)
                         {
                             return true;
