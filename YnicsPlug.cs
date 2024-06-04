@@ -4,6 +4,9 @@ using Oxide.Game.Rust.Cui;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using WebSocketSharp;
+using Steamworks;
+using System.Linq;
 
 namespace Oxide.Plugins{
     [Info("Ynic's plugin","Ynic", "0.0.1")]
@@ -70,9 +73,13 @@ namespace Oxide.Plugins{
 
         //Удаляем hud таймера, если он включен, иначе ничего не происходит
         [ChatCommand("stoptimer")]
-        void StopTimer(){
+        void StopTimer(BasePlayer player){
+            if (!IsAdmin(player)){
+                player.ChatMessage("У вас не хватает прав");
+                return;
+            }
             isWork = false;
-            foreach (var player in BasePlayer.activePlayerList) {
+            foreach (var user in BasePlayer.activePlayerList) {
                 CuiHelper.DestroyUi(player, "timer_background");
                 restrictedPlayers.Add(player.userID);
             }
@@ -84,8 +91,23 @@ namespace Oxide.Plugins{
                 player.ChatMessage("Строительство запрещено");
                 return false;
             }
+            if (construction!=null && 
+            (construction.fullName.Basename()=="cupboard.tool.deployed.prefab" ||
+            construction.fullName.Basename()=="cupboard.tool.retro.deployed.prefab")){
+                foreach (var mark in markToOwner){
+                    if (mark.Value.Contains(player.userID)){
+                        player.ChatMessage("У вас уже стоит шкаф!");
+                        return false;
+                    }
+                }
+            }
             return null;
         }
+
+        // private bool IsBuildingBlock(Construction construction)
+        // {
+        //     return construction.fullName.Contains("build");
+        // }
 
         [ChatCommand("clearme")]
         void ClearPlayer(BasePlayer player){
@@ -107,9 +129,20 @@ namespace Oxide.Plugins{
                 player.ChatMessage("Вы не ввели SteamID пользователя");
             }
 
-            BasePlayer targetPlayer = BasePlayer.Find(args[0]);
-            if (targetPlayer == null){
-                player.ChatMessage("Вы ввели неверный SteamID пользователя");
+            if (ulong.TryParse(args[0],out ulong steamID)){
+                Killing(steamID, player);
+            } else {
+                player.ChatMessage("Неккоректно введен SteamID");
+            }
+            
+        }
+
+        void Killing(ulong userId, BasePlayer player = null){
+            BasePlayer targetPlayer = BasePlayer.FindByID(userId);
+            if (targetPlayer == null && player!=null){
+                player.ChatMessage("Пользователь не найден");
+                return;
+            } else if(targetPlayer == null && player==null){
                 return;
             }
             
@@ -117,17 +150,22 @@ namespace Oxide.Plugins{
                 SpawnExplosion(targetPlayer.transform.position);
                 targetPlayer.Hurt(1000);
             }
-            
-            BanPlayerId(targetPlayer, player);
-        }
 
-        void BanPlayerId(BasePlayer targetPlayer, BasePlayer player){
+            if (player != null){
+                BanPlayerId(targetPlayer, player.displayName);
+                return;
+            }
+
+            BanPlayerId(targetPlayer);
+        }
+        
+        void BanPlayerId(BasePlayer targetPlayer, string name = "Проигрыш"){
             if (targetPlayer != null)
             {
                 targetPlayer.Kick("Вы были забанены администратором.");
             }
 
-            ServerUsers.Set(targetPlayer.userID, ServerUsers.UserGroup.Banned, player.displayName, "Вы умерли");
+            ServerUsers.Set(targetPlayer.userID, ServerUsers.UserGroup.Banned, name, "Вы умерли");
         }
 
         void SpawnExplosion(Vector3 position){
@@ -135,10 +173,10 @@ namespace Oxide.Plugins{
         }
 
         bool IsAdmin(BasePlayer player) {
-        return player.IsAdmin || player.net?.connection?.authLevel == 2;
+            return player.IsAdmin || player.net?.connection?.authLevel == 2;
         }
         
-        void CreateMarker(Vector3 markPosition){
+        void CreateMarker(Vector3 markPosition, BasePlayer player, List<ulong> users = null){
             MapMarkerGenericRadius mapMarker = GameManager.server.CreateEntity(
                     "assets/prefabs/tools/map/genericradiusmarker.prefab", markPosition) 
                     as MapMarkerGenericRadius;
@@ -152,7 +190,13 @@ namespace Oxide.Plugins{
             mapMarker.radius = 0.1f;
             mapMarker.Spawn();
             mapMarker.SendUpdate();
-            markOfToolbox.Add(mapMarker);
+            List<ulong> usersID = new List<ulong>();
+            if (player != null){
+                usersID = listFriend(player);
+            } else {
+                usersID = users;
+            }
+            markToOwner.Add(mapMarker, usersID);
             Puts("Mark is succesfully created");
         }
 
@@ -164,37 +208,47 @@ namespace Oxide.Plugins{
 
             if (entity.ShortPrefabName=="cupboard.tool.retro.deployed" 
             || entity.ShortPrefabName=="cupboard.tool.deployed"){
+                BasePlayer player = plan.GetOwnerPlayer();
                 Vector3 markPosition = entity.GetNetworkPosition();
-                CreateMarker(markPosition);
+                CreateMarker(markPosition, player);
             }
         }
 
-        void OnEntityDeath(BaseCombatEntity entity, HitInfo info){
-            if (entity==null){
-                return;
-            }
-
-            if (entity.ShortPrefabName=="cupboard.tool.retro.deployed" 
-            || entity.ShortPrefabName=="cupboard.tool.deployed"){
+        object OnEntityKill(BaseNetworkable entity){
+            if (entity!=null && (entity.ShortPrefabName=="cupboard.tool.retro.deployed" 
+            || entity.ShortPrefabName=="cupboard.tool.deployed")){
+                List<MapMarkerGenericRadius> markToRemove = new List<MapMarkerGenericRadius>();
                 Vector3 entityPosition = entity.GetNetworkPosition();
-                foreach (var mark in markOfToolbox){
-                    if (mark.GetNetworkPosition() == entityPosition){
-                        mark.Kill();
-                        markOfToolbox.Remove(mark);
-                        Puts("Toolbox was destoyed");
+                foreach (var mark in markToOwner){
+                    if (mark.Key.GetNetworkPosition() == entityPosition){
+                        markToRemove.Add(mark.Key);
                     }
                 }
+                foreach (var mark in markToRemove){
+                    List<ulong> usersID = markToOwner[mark];
+                    foreach (var userID in usersID){
+                        removeEntitys(userID);
+                        Killing(userID);
+                    }
+                    markToOwner.Remove(mark);
+                    mark.Kill();
+                    Puts("Toolbox was destoyed");
+                }
             }
+            return null;
         }
 
         void OnPlayerConnected(BasePlayer player){
             if (player!=null){
-                foreach(var mark in markOfToolbox){
-                    Vector3 markPosition = mark.GetNetworkPosition();
-                    mark.Kill();
-                    markOfToolbox.Remove(mark);
-                    CreateMarker(markPosition);
-                }  
+                Dictionary<Vector3, List<ulong>> saveMarks = new Dictionary<Vector3, List<ulong>>();
+                foreach(var mark in markToOwner){
+                    saveMarks.Add(mark.Key.GetNetworkPosition(), mark.Value);
+                    mark.Key.Kill();
+                }
+                markToOwner.Clear();
+                foreach(var mark in saveMarks){
+                    CreateMarker(mark.Key,null,mark.Value);
+                }
             }
         }
 
@@ -213,16 +267,10 @@ namespace Oxide.Plugins{
         {   
             if (!pvpMode){
                 if (entity is BasePlayer targetPlayer && 
-                !targetPlayer.ShortPrefabName.Contains("scientistnpc") &&
-                !targetPlayer.ShortPrefabName.Contains("npc_tunnel") && 
-                !targetPlayer.ShortPrefabName.Contains("npc_underwater") &&
-                targetPlayer.ShortPrefabName != "npc_bandit_guard"){
+                !targetPlayer.ShortPrefabName.Contains("npc")){
 
                     if (info.Initiator is BasePlayer attackerPlayer && 
-                    !attackerPlayer.ShortPrefabName.Contains("scientistnpc") &&
-                    !attackerPlayer.ShortPrefabName.Contains("npc_tunnel") && 
-                    !attackerPlayer.ShortPrefabName.Contains("npc_underwater") &&
-                    attackerPlayer.ShortPrefabName != "npc_bandit_guard"){
+                    !attackerPlayer.ShortPrefabName.Contains("npc")){
                         if (attackerPlayer != targetPlayer)
                         {
                             return true;
@@ -233,10 +281,113 @@ namespace Oxide.Plugins{
             return null;
         }
 
-        bool pvpMode = true;
-        private List<MapMarkerGenericRadius> markOfToolbox = new List<MapMarkerGenericRadius>();
+        [ChatCommand("checkTool")]
+        void CheckOfToolbox(BasePlayer player){
+            if (!IsAdmin(player)){
+                player.ChatMessage("У вас не хватает прав");
+                return;
+            }
+            string allPosition = "Шкафы на координатах: ";
+            foreach (var mark in markToOwner){
+                allPosition += "\""+mark.Key.GetNetworkPosition().ToString();
+                foreach (var id in mark.Value)
+                {
+                    allPosition += " " + id.ToString();
+                }
+                allPosition += "\"";
+            }
+            player.ChatMessage(allPosition);
+        }
+
+        [ChatCommand("friends")]
+        void CheckFriends(BasePlayer player, string command, string[] args){
+            if (!IsAdmin(player)){
+                player.ChatMessage("Не хватает прав!");
+                return;
+            }
+
+            if (args.Length==0){
+                player.ChatMessage("Введите id пользователя");
+                return;
+            }
+            
+            BasePlayer targertPlayer = BasePlayer.Find(args[0]);
+
+            List<ulong> usersID = listFriend(targertPlayer);
+
+            foreach (var id in usersID){
+                player.ChatMessage(id.ToString());
+            }
+        }
+
+        List<ulong> listFriend(BasePlayer player){
+            RelationshipManager.PlayerTeam team = RelationshipManager.ServerInstance.FindPlayersTeam(player.userID);
+
+            if (team == null)
+            {
+                Puts("NO TEAM");
+                List<ulong> userId = new List<ulong>();
+                userId.Add(player.userID);
+                return userId;
+            } 
+
+            List<ulong> usersId = new List<ulong>();
+            return team.members;
+        }
+
+        void removeEntitys(ulong userID){
+            foreach (var entity in BaseNetworkable.serverEntities){
+                if (entity is BuildingBlock block){
+                    if (block.OwnerID == userID){
+                        block.Kill();
+                    }
+                }
+            }
+        }
+
+        private Dictionary<MapMarkerGenericRadius, List<ulong>> markToOwner = new Dictionary<MapMarkerGenericRadius, List<ulong>>();
+        
+        object OnTeamUpdate(ulong currentTeam, ulong newTeam, BasePlayer player)
+        {
+            RelationshipManager.PlayerTeam team = RelationshipManager.ServerInstance.FindPlayersTeam(player.userID);
+            ulong teamLeader = team.GetLeader().userID;
+            MapMarkerGenericRadius key = null;
+            foreach(var mark in markToOwner){
+                if (mark.Value.Contains(teamLeader)){
+                    key = mark.Key;
+                }
+            }
+            if (key!=null){
+                foreach(var member in team.members){
+                    if (!markToOwner[key].Contains(member)){
+                        markToOwner[key].Add(member);
+                    }
+                }
+            }
+            else{
+                foreach(var mark in markToOwner){
+                    foreach(var member in team.members){
+                        if (mark.Value.Contains(member)){
+                            key=mark.Key;
+                        }
+                    }
+                }
+                if (key==null){
+                    return null;
+                } else {
+                    foreach(var member in team.members){
+                        if(!markToOwner[key].Contains(member)){
+                            markToOwner[key].Add(member);
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        private bool pvpMode = true;
         private List<ulong> restrictedPlayers = new List<ulong>();
-        string CUI_MAIN = @"
+        private string CUI_MAIN = @"
         [
   {
     ""name"": ""timer_background"",
